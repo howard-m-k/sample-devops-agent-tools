@@ -13,9 +13,11 @@ All notable changes to this skill are documented here. New entries go at the top
 - **Removed account-level Block Public Access assessment.** The
   `s3control:GetPublicAccessBlock` / `s3:GetAccountPublicAccessBlock` call is gone;
   account-wide configuration is out of scope. Block Public Access is now evaluated at
-  the **bucket level only**, and the "not configured at the bucket level" finding notes
-  that account-level BPA should be verified separately (escalating to critical only when
-  the bucket-level ACL or policy shows real public exposure).
+  the **bucket level only**. When bucket-level BPA is absent, the finding sets
+  expectations explicitly — account-level BPA cannot be checked with the DevOps
+  Agent's default permissions, so the user is told to confirm it manually — and it
+  escalates to critical only when the bucket-level ACL or policy shows real public
+  exposure.
 
 ### Removed
 - `s3:ListBucket`, `s3:ListAllMyBuckets`, and `s3:GetAccountPublicAccessBlock` from the

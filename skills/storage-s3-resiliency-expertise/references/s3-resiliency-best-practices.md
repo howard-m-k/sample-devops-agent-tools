@@ -132,7 +132,7 @@ Add `Deny on aws:SecureTransport: false` to every production bucket. Costs nothi
 
 **Bucket-level BPA is necessary when** you have a few legitimately-public buckets (static website hosting, public dataset distribution, etc.). In that case, leave bucket-level BPA on for everything else and disable specific settings only on the buckets that need to be public.
 
-> **Scope note:** This skill assesses Block Public Access at the **bucket level only** — it does not read account-level BPA (that requires account-wide configuration access, which is out of scope). When a bucket has no bucket-level BPA, the finding recommends verifying account-level BPA separately rather than asserting whether it is enabled.
+> **Scope note:** This skill assesses Block Public Access at the **bucket level only** — it does not read account-level BPA (that requires account-wide configuration access, which the DevOps Agent's default permissions don't grant). When a bucket has no bucket-level BPA, the finding sets that expectation explicitly: account-level BPA can't be checked with default permissions, so the user must confirm it manually before treating the bucket as publicly exposed.
 
 ### The 4 settings, and what they actually do
 

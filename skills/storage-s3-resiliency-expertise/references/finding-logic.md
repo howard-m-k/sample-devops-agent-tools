@@ -177,7 +177,7 @@ Only recommend adding Deny protections for features that are actually configured
 
 **3. Not configured at the bucket level:**
 - severity: warning (escalates to critical if the cross-referenced ACL or bucket policy reveals active public exposure)
-- base body: "Block Public Access is not configured at the bucket level. Enable all 4 Block Public Access settings at the bucket level unless public access is intentionally required. Account-level Block Public Access can protect all buckets in an account, but assessing account-level configuration is outside this skill's scope — verify it separately."
+- base body: "Block Public Access is not configured at the bucket level. Enable all 4 Block Public Access settings at the bucket level unless public access is intentionally required. This bucket may still be protected by **account-level** Block Public Access — but account-level BPA cannot be checked with the DevOps Agent's default permissions, so this skill does not evaluate it. Manually confirm whether account-level Block Public Access is enabled before treating this bucket as publicly exposed."
 - Then cross-reference bucket-level exposure, appending only the fragments that fired:
   - If public ACLs (AllUsers or AuthenticatedUsers grants) exist → severity escalates to **critical**: "Public ACLs are present on this bucket and, with no bucket-level Block Public Access, are in effect."
   - If a public bucket policy (`Principal: "*"` in an Allow statement) exists → severity escalates to **critical**: "The bucket policy grants public access and, with no bucket-level Block Public Access, this policy is in effect."
