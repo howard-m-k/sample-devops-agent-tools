@@ -13,21 +13,18 @@ This document defines the multi-bucket review behavior. Load this file ONLY when
 ## Execution Flow (Fleet)
 
 1. Parse all bucket names from input
-2. Group buckets by account (for caching)
-3. For each unique account: query account-level BPA once, cache result
-4. For each bucket: collect configuration per `references/data-collection.md`
-   - Pass cached account-level BPA to avoid redundant calls
-5. For each bucket: apply finding logic from `references/finding-logic.md`
-6. Compute resiliency rating per bucket
-7. Sort results (see Sort Options)
-8. Render fleet report (see Fleet Report Structure)
-9. If batched: save manifest, present batch summary, ask to continue
+2. Group buckets by account (for CloudTrail caching)
+3. For each bucket: collect configuration per `references/data-collection.md`
+4. For each bucket: apply finding logic from `references/finding-logic.md`
+5. Compute resiliency rating per bucket
+6. Sort results (see Sort Options)
+7. Render fleet report (see Fleet Report Structure)
+8. If batched: save manifest, present batch summary, ask to continue
 
 ## Caching Strategy
 
 | Data | Scope | Cache key | Benefit |
 |---|---|---|---|
-| Account-level BPA | Per account | `account_id` | 20 buckets in 4 accounts = 4 calls, not 20 |
 | CloudTrail trails | Per account + region | `account_id:region` | Trails are account-wide; query once per account |
 | Bucket region | Per bucket | `bucket_name` | Each bucket may be in a different region |
 

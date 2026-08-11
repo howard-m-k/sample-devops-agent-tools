@@ -27,6 +27,7 @@ Metadata:
           - EnableMskOperations
           - EnableServiceQuotaCheck
           - EnableDmsOperationReview
+          - EnableStorageS3Resiliency
       - Label:
           default: Optional Resource Scoping
         Parameters:
@@ -111,6 +112,12 @@ Parameters:
     AllowedValues: ['true', 'false']
     Default: 'true'
 
+  EnableStorageS3Resiliency:
+    Type: String
+    Description: S3 Resiliency Review skill (adds s3:GetBucketWebsite; all other reads are covered by the managed policy).
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+
 Conditions:
   CreateNewRole: !Equals [!Ref ExistingRoleName, '']
   SkillAwsHealthEvents: !Equals [!Ref EnableAwsHealthEvents, 'true']
@@ -120,6 +127,7 @@ Conditions:
   SkillMskOperations: !Equals [!Ref EnableMskOperations, 'true']
   SkillServiceQuotaCheck: !Equals [!Ref EnableServiceQuotaCheck, 'true']
   SkillDmsOperationReview: !Equals [!Ref EnableDmsOperationReview, 'true']
+  SkillStorageS3Resiliency: !Equals [!Ref EnableStorageS3Resiliency, 'true']
   HasRegionRestriction: !Not [!Equals [!Join ['', !Ref AllowedRegions], '']]
 
 Resources:
@@ -302,6 +310,29 @@ Resources:
               - dms:TestConnection
             Resource: '*'
 
+  # storage-s3-resiliency-expertise: adds s3:GetBucketWebsite
+  # (all other reads it uses — GetBucketLocation, GetBucketVersioning,
+  # GetReplicationConfiguration, GetBucketObjectLockConfiguration, GetBucketPolicy,
+  # GetBucketPublicAccessBlock, GetEncryptionConfiguration, GetBucketOwnershipControls,
+  # GetBucketAcl, GetBucketLogging, GetBucketCORS, and cloudtrail:DescribeTrails/
+  # GetEventSelectors — are covered by AIDevOpsAgentAccessPolicy). It does NOT use
+  # s3:ListBucket (uses GetBucketLocation for Region discovery) or account-level BPA.
+  PolicyStorageS3Resiliency:
+    Type: AWS::IAM::Policy
+    Condition: SkillStorageS3Resiliency
+    Properties:
+      PolicyName: DevOpsAgentSkill-StorageS3Resiliency
+      Roles:
+        - !If [CreateNewRole, !Ref DevOpsAgentRole, !Ref ExistingRoleName]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: S3ResiliencyGetBucketWebsite
+            Effect: Allow
+            Action:
+              - s3:GetBucketWebsite
+            Resource: '*'
+
   # Optional: restrict agent to specific regions
   PolicyRegionalRestriction:
     Type: AWS::IAM::Policy
@@ -349,6 +380,7 @@ Outputs:
         - msk-operations: ${EnableMskOperations} (kafka:GetBootstrapBrokers)
         - service-quota-check: ${EnableServiceQuotaCheck} (servicequotas:*, cloudwatch:GetMetricData/GetMetricStatistics)
         - database-migration-service-expertise: ${EnableDmsOperationReview} (dms:TestConnection)
+        - storage-s3-resiliency-expertise: ${EnableStorageS3Resiliency} (s3:GetBucketWebsite)
       Skills covered by AIDevOpsAgentAccessPolicy (no extra policy needed):
         - eks-operation-review, enrich-with-aws-security-agent, crm-production-investigation-guidelines
       No IAM required:

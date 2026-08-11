@@ -13,7 +13,7 @@ using read-only control-plane API calls and evaluates it across nine dimensions:
 2. **Replication** — cross-region / cross-account redundancy (four-quadrant risk model)
 3. **Object Lock** — immutability / WORM protection
 4. **Bucket policy** — defensive Deny statements and transport security
-5. **Block Public Access** — bucket- and account-level, cross-referenced with ACLs and policy
+5. **Block Public Access** — bucket-level, cross-referenced with ACLs and policy
 6. **Default encryption** — SSE-S3 / SSE-KMS / DSSE-KMS and Bucket Key
 7. **Ownership controls** — ACL posture and BucketOwnerEnforced migration
 8. **Server access logging** — logging or CloudTrail S3 data events for audit trail
@@ -33,21 +33,18 @@ produce complete results. These are IAM action names (which differ from the API
 call names for some S3 operations):
 
 ```
-s3:ListBucket
-s3:ListAllMyBuckets
+s3:GetBucketLocation
 s3:GetBucketVersioning
 s3:GetReplicationConfiguration
 s3:GetBucketObjectLockConfiguration
 s3:GetBucketPolicy
 s3:GetBucketPublicAccessBlock
-s3:GetAccountPublicAccessBlock
 s3:GetEncryptionConfiguration
 s3:GetBucketOwnershipControls
 s3:GetBucketAcl
 s3:GetBucketLogging
 s3:GetBucketWebsite
 s3:GetBucketCORS
-s3:GetBucketLocation
 cloudtrail:DescribeTrails
 cloudtrail:GetEventSelectors
 ```
@@ -55,11 +52,18 @@ cloudtrail:GetEventSelectors
 (`sts:GetCallerIdentity` is also used to resolve the account ID; it requires no
 IAM permission.)
 
-Most of these are covered by `AIDevOpsAgentAccessPolicy`. If a check lacks
-permission, the skill reports it as "Unable to verify — access denied" and caps the
-Resiliency Rating at Medium rather than guessing the configuration.
+All of these are covered by the AWS-managed `AIDevOpsAgentAccessPolicy` **except
+`s3:GetBucketWebsite`**, which is granted by the opt-in `EnableStorageS3Resiliency`
+parameter (default `true`) in
+[`cloudformation/devops-agent-skill-policies.yaml`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/cloudformation/devops-agent-skill-policies.yaml).
+If a check lacks permission, the skill reports it as "Unable to verify — access
+denied" and caps the Resiliency Rating at Medium rather than guessing the
+configuration.
 
-The skill **never** reads object data (`GetObject`) and **never** performs any
+The skill is scoped to least privilege: it uses `GetBucketLocation` (not
+`HeadBucket`) for Region discovery so it never needs `s3:ListBucket`, it assesses
+Block Public Access at the **bucket level only** (no account-level configuration
+access), it **never** reads object data (`GetObject`), and it **never** performs any
 write, create, update, or delete operation.
 
 ## How to use it with DevOps Agent

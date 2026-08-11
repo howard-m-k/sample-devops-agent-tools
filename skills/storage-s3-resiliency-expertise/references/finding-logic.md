@@ -36,9 +36,9 @@ If a check's status is `AccessDenied` or `ToolingFailure`, that check's finding 
 
 **Input:** `checks.replication.status` + `checks.replication.value`
 
-**Destination classification:** Use `value.destination_region` vs source `region` for cross-region determination. Use `value.destination_account` vs source `account_id` for cross-account determination. If `value.destination_lookup == "lookup_failed"` → use the 403 scenario.
+**Destination classification:** The destination Region comes from `GetBucketLocation` on the destination bucket (`value.destination_region`); compare it to the source `region` for cross-region determination. Use `value.destination_account` (from the replication rule configuration) vs source `account_id` for cross-account determination. If `value.destination_lookup == "lookup_failed"` (e.g., a cross-account destination the role cannot read), the destination Region is unknown → use scenario 4; cross-region vs same-region cannot be determined. (Note: unlike `HeadBucket`, `GetBucketLocation` does not return the Region when access is denied — this is an accepted tradeoff of not granting `s3:ListBucket`.)
 
-**Finding summaries (7 scenarios):**
+**Finding summaries (6 scenarios):**
 
 **1. Not configured:**
 - severity: critical
@@ -52,9 +52,9 @@ If a check's status is `AccessDenied` or `ToolingFailure`, that check's finding 
 - severity: success
 - body: "S3 Replication is configured. Objects are replicated to `<destination bucket>` in `<destination region>` (cross-region, cross-account). Delete marker replication is `<enabled/disabled>`."
 
-**4. Cross-region, lookup failed:**
+**4. Destination Region unknown (lookup failed):**
 - severity: warning
-- body: "S3 Replication is configured. Objects are replicated to `<destination bucket>` in `<destination region>` (cross-region). Unable to verify destination account ownership — HeadBucket returned 403 (destination may be owned by a different account or insufficient permissions). Investigate permissions to ensure the reviewing principal has `s3:HeadBucket` access to the destination bucket for a complete resiliency assessment. Delete marker replication is `<enabled/disabled>`."
+- body: "S3 Replication is configured to `<destination bucket>`, but the destination Region could not be determined — GetBucketLocation returned AccessDenied (403) on the destination (it is likely owned by a different account, or the role lacks `s3:GetBucketLocation` on it). Because the destination Region is unknown, cross-region redundancy cannot be confirmed for this bucket. Grant the reviewing principal `s3:GetBucketLocation` on the destination bucket for a complete resiliency assessment. Delete marker replication is `<enabled/disabled>`."
 
 **5. Same-region, same account:**
 - severity: warning
@@ -63,10 +63,6 @@ If a check's status is `AccessDenied` or `ToolingFailure`, that check's finding 
 **6. Same-region, cross account:**
 - severity: warning
 - body: "S3 Replication is configured to `<destination bucket>` (cross-account), but both source and destination are in `<region>`. Same-region replication does not provide protection against a regional outage. For disaster recovery, configure cross-region replication. Delete marker replication is `<enabled/disabled>`."
-
-**7. Same-region, lookup failed:**
-- severity: warning
-- body: "S3 Replication is configured to `<destination bucket>`, but both source and destination are in `<region>`. Unable to verify destination account ownership — HeadBucket returned 403 (destination may be owned by a different account or insufficient permissions). Investigate permissions to ensure the reviewing principal has `s3:HeadBucket` access to the destination bucket for a complete resiliency assessment. Same-region replication does not provide protection against a regional outage. For disaster recovery, configure cross-region replication. Delete marker replication is `<enabled/disabled>`."
 
 ### Object Lock
 
@@ -147,12 +143,12 @@ Only recommend adding Deny protections for features that are actually configured
 
 ## Block Public Access (BPA)
 
-**Input:** `checks.bpa_bucket` + `checks.bpa_account` + `checks.acl` + `checks.bucket_policy`
+**Input:** `checks.bpa_bucket` + `checks.acl` + `checks.bucket_policy`
 
 **Conditional logic:**
-- Evaluate BPA at bucket level first. If NotConfigured, check account level.
-- If all 4 settings are enabled at either level, report as fully protected.
-- If partially enabled, cross-reference ACL and bucket policy data.
+- Evaluate BPA at the bucket level only. Account-level BPA is out of scope for this skill (not collected).
+- If all 4 settings are enabled at the bucket level, report as fully protected.
+- If partially enabled or not configured, cross-reference bucket-level ACL and bucket policy data for actual public exposure.
 
 **Finding summaries:**
 
@@ -160,9 +156,9 @@ Only recommend adding Deny protections for features that are actually configured
 - severity: success
 - body: "Block Public Access is fully enabled at the bucket level. All 4 settings are active."
 
-**2. Partially enabled (bucket or account level) — combined finding:**
+**2. Partially enabled at the bucket level — combined finding:**
 - severity: warning (or critical if cross-referenced sub-findings reveal active public exposure)
-- base body: "Block Public Access is partially enabled at the `<bucket/account>` level."
+- base body: "Block Public Access is partially enabled at the bucket level."
 - Then append, in this order, only the fragments that fired:
 
 **ACL exposure fragment (IgnorePublicAcls + BlockPublicAcls):**
@@ -179,21 +175,12 @@ Only recommend adding Deny protections for features that are actually configured
 
 **Closing line (always appended):** "Enable all 4 Block Public Access settings unless public access is intentionally required."
 
-**3. Not configured at bucket level + all 4 enabled at account level:**
-- severity: success
-- body: "Block Public Access is not configured at the bucket level. Account-level Block Public Access is fully enabled, providing protection across all buckets in the account without requiring per-bucket configuration."
-
-**4. Not configured at bucket level + partially enabled at account level:**
-- severity: warning (or critical if cross-referenced sub-findings reveal active public exposure)
-- Use the same combined finding logic as scenario 2, but the base body says "at the account level" instead of "at the bucket level".
-
-**5. Not configured at bucket level + not configured at account level:**
-- severity: critical
-- body: "Block Public Access is not configured at either the bucket or account level. The bucket has no BPA protection against public access. Enable all 4 Block Public Access settings at the bucket level."
-
-**6. Not configured at bucket level + unable to check account level (AccessDenied/ToolingFailure):**
-- severity: warning
-- body: "Block Public Access is not configured at the bucket level. Unable to verify account-level Block Public Access — insufficient permissions. Investigate permissions and verify BPA is enabled at the bucket or account level."
+**3. Not configured at the bucket level:**
+- severity: warning (escalates to critical if the cross-referenced ACL or bucket policy reveals active public exposure)
+- base body: "Block Public Access is not configured at the bucket level. Enable all 4 Block Public Access settings at the bucket level unless public access is intentionally required. Account-level Block Public Access can protect all buckets in an account, but assessing account-level configuration is outside this skill's scope — verify it separately."
+- Then cross-reference bucket-level exposure, appending only the fragments that fired:
+  - If public ACLs (AllUsers or AuthenticatedUsers grants) exist → severity escalates to **critical**: "Public ACLs are present on this bucket and, with no bucket-level Block Public Access, are in effect."
+  - If a public bucket policy (`Principal: "*"` in an Allow statement) exists → severity escalates to **critical**: "The bucket policy grants public access and, with no bucket-level Block Public Access, this policy is in effect."
 
 ## Default encryption
 
@@ -299,7 +286,7 @@ Only recommend adding Deny protections for features that are actually configured
 
 ## Website hosting
 
-**Input:** `checks.website` + `checks.cors` + `checks.bpa_bucket` + `checks.bpa_account` + `checks.bucket_policy`
+**Input:** `checks.website` + `checks.cors` + `checks.bpa_bucket` + `checks.bucket_policy`
 
 **Conditional logic:**
 - If website hosting is NOT configured: report and skip sub-checks
@@ -320,7 +307,7 @@ Only recommend adding Deny protections for features that are actually configured
 - body: "S3 static website hosting is enabled, but anonymous `s3:GetObject` access is blocked by: `<list of blockers>`. Website requests will be blocked. Resolve by either disabling website hosting if it is not needed, or addressing the access blocks if public website access is intended. CORS `<is configured with N rules / is not configured>`. Buckets configured for static website hosting are intended for public content. Ensure sensitive or critical data is not stored in this bucket. Separate public content from sensitive data by using dedicated buckets for each purpose."
 
 Where `<list of blockers>` includes whichever apply:
-- Block Public Access enabled at the `<bucket/account>` level
+- Block Public Access enabled at the bucket level
 - Bucket policy does not grant `s3:GetObject` to `Principal: "*"`
 - Bucket policy contains an explicit Deny on `s3:GetObject` for anonymous access `<unconditionally / with conditions: condition keys>`
 - No bucket policy configured

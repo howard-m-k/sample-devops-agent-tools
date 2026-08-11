@@ -56,15 +56,15 @@ Default is OFF. The SKILL.md surfaces this as `<enabled/disabled>` in every repl
 
 Most customers should leave it OFF for resiliency purposes. Most customers WHO TURN IT ON do so to satisfy audit requirements, not for resiliency benefit.
 
-### 403 on destination HeadBucket
+### 403 on destination GetBucketLocation
 
-Surface this as ⚠️, not ❌. A 403 doesn't mean replication is broken — it means the reviewing principal can't verify destination ownership. Common causes:
+Surface this as ⚠️, not ❌. A 403 doesn't mean replication is broken — it means the reviewing principal can't read the destination bucket's Region, so cross-region redundancy can't be confirmed. Common causes:
 
 1. Cross-account destination, reviewer doesn't have a role in the destination account (most common — usually intentional)
-2. SCP on destination account denies HeadBucket from the source account
-3. Destination bucket policy explicitly denies HeadBucket
+2. SCP on the destination account denies `s3:GetBucketLocation` from the source account
+3. Destination bucket policy explicitly denies `s3:GetBucketLocation`
 
-The right framing: "Investigate permissions to verify destination ownership for a complete resiliency picture. The replication itself may be fine."
+The right framing: "The destination Region couldn't be determined, so cross-region redundancy is unconfirmed. Grant `s3:GetBucketLocation` on the destination for a complete resiliency picture — the replication itself may be fine." Note: unlike `HeadBucket`, `GetBucketLocation` returns nothing on a denied call — the accepted tradeoff of not granting the object-listing-capable `s3:ListBucket`.
 
 ## Object Lock
 
@@ -131,6 +131,8 @@ Add `Deny on aws:SecureTransport: false` to every production bucket. Costs nothi
 **Account-level BPA is the better default.** It applies to all current and future buckets, can't be forgotten on a new bucket, and doesn't require per-bucket configuration drift.
 
 **Bucket-level BPA is necessary when** you have a few legitimately-public buckets (static website hosting, public dataset distribution, etc.). In that case, leave bucket-level BPA on for everything else and disable specific settings only on the buckets that need to be public.
+
+> **Scope note:** This skill assesses Block Public Access at the **bucket level only** — it does not read account-level BPA (that requires account-wide configuration access, which is out of scope). When a bucket has no bucket-level BPA, the finding recommends verifying account-level BPA separately rather than asserting whether it is enabled.
 
 ### The 4 settings, and what they actually do
 

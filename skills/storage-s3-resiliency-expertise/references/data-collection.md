@@ -21,9 +21,20 @@ CloudTrail read operations only.
 
 ### Phase 1: Region discovery (sequential, required first)
 
-Call `HeadBucket` for the bucket and read the bucket region from the response
-(`x-amz-bucket-region` header / `BucketRegion`). If the bucket does not exist or the
-role has no access, return `{ "error": "bucket_not_found", "bucket": "<name>" }`.
+Call `GetBucketLocation` for the bucket and read the region from `LocationConstraint`
+(an empty/null value means `us-east-1`; the legacy value `EU` means `eu-west-1`). If
+the bucket does not exist (`NoSuchBucket`) or the role has no access (`AccessDenied`),
+return `{ "error": "bucket_not_found", "bucket": "<name>" }`.
+
+> **Maintainer note (internal — do NOT surface in the rendered report):**
+> `GetBucketLocation` is used here deliberately instead of the AWS-recommended
+> `HeadBucket`. `HeadBucket`'s IAM permission is `s3:ListBucket` — the same action
+> that authorizes listing a bucket's object contents (`ListObjectsV2`). Granting it
+> would let this read-only review enumerate objects, which is out of scope. There is
+> no action-level way to allow `HeadBucket` without also allowing object listing.
+> `GetBucketLocation` requires only `s3:GetBucketLocation` (a bucket-level call with
+> no object-listing capability) and is fully supported for backward compatibility.
+> Do not "optimize" this back to `HeadBucket`.
 
 Get the account ID with `sts:GetCallerIdentity` (Account).
 
@@ -48,15 +59,20 @@ All calls target the bucket in its discovered region:
 
 ### Phase 3: Conditional calls (based on Phase 2 results)
 
-- **If `bpa_bucket` is NotConfigured:** run the account-level BPA check with
-  `s3control:GetPublicAccessBlock` for the account ID.
 - **If `logging` is NotConfigured:** run `cloudtrail:DescribeTrails`, then for each
   trail `cloudtrail:GetEventSelectors` (in the trail's home region) to determine
   whether any trail captures S3 data events covering this bucket.
-- **If `replication` is OK:** run `HeadBucket` on the destination bucket to determine
-  its region/account. A 403 here is expected for cross-account destinations — record
-  it as `destination_lookup: "lookup_failed"`, do not treat it as an error.
+- **If `replication` is OK:** run `GetBucketLocation` on the destination bucket to
+  determine its region. A `403`/`AccessDenied` here is expected for cross-account
+  destinations — record it as `destination_lookup: "lookup_failed"`, do not treat it
+  as an error. (`destination_account` comes from the replication rule configuration,
+  not from this lookup, so cross-account classification is unaffected.)
 - **CORS** (only if website is configured): `s3:GetBucketCors`.
+
+**Account-level Block Public Access is intentionally NOT collected.** Assessing
+account-wide configuration is out of scope for this bucket-focused review, so there
+is no `s3control:GetPublicAccessBlock` / account-BPA call. Block Public Access is
+evaluated at the bucket level only (see `finding-logic.md`).
 
 ### Phase 4: Return structured output
 
@@ -126,14 +142,6 @@ checks:
       block_public_policy: <bool>,
       restrict_public_buckets: <bool>
     }
-  bpa_account:
-    status: "OK" | "NotConfigured" | "AccessDenied" | "ToolingFailure"
-    value: null | {
-      block_public_acls: <bool>,
-      ignore_public_acls: <bool>,
-      block_public_policy: <bool>,
-      restrict_public_buckets: <bool>
-    }
   encryption:
     status: "OK" | "NotConfigured" | "AccessDenied" | "ToolingFailure"
     value: null | {
@@ -180,10 +188,14 @@ Only these read-only operations are permitted:
 
 | Service | Operations |
 |---|---|
-| S3 | `HeadBucket`, `GetBucketVersioning`, `GetBucketReplication`, `GetBucketEncryption`, `GetPublicAccessBlock`, `GetBucketPolicy`, `GetBucketAcl`, `GetBucketLogging`, `GetBucketWebsite`, `GetBucketCors`, `GetBucketOwnershipControls`, `GetObjectLockConfiguration` |
-| S3 Control | `GetPublicAccessBlock` |
+| S3 | `GetBucketLocation`, `GetBucketVersioning`, `GetBucketReplication`, `GetBucketEncryption`, `GetPublicAccessBlock` (bucket-level only), `GetBucketPolicy`, `GetBucketAcl`, `GetBucketLogging`, `GetBucketWebsite`, `GetBucketCors`, `GetBucketOwnershipControls`, `GetObjectLockConfiguration` |
 | STS | `GetCallerIdentity` |
 | CloudTrail | `DescribeTrails`, `GetEventSelectors` |
+
+`HeadBucket` and `s3control:GetPublicAccessBlock` are intentionally NOT in the
+allowlist — `HeadBucket` requires `s3:ListBucket` (which also permits object
+listing), and account-level BPA is out of scope. See the Phase 1 maintainer note and
+the Block Public Access finding logic.
 
 **Hard denials:** any `Put*`, `Delete*`, `Create*`, or `Update*` operation. Any
 `GetObject` or `GetObjectVersion`. This skill never reads object data and never

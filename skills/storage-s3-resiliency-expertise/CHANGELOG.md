@@ -2,6 +2,34 @@
 
 All notable changes to this skill are documented here. New entries go at the top.
 
+## [1.1.0] - 2026-08-11
+
+### Changed (least-privilege / security scoping)
+- **Region discovery now uses `GetBucketLocation` instead of `HeadBucket`.**
+  `HeadBucket`'s IAM permission is `s3:ListBucket`, which also authorizes listing a
+  bucket's object contents — out of scope for a read-only review. `GetBucketLocation`
+  needs only `s3:GetBucketLocation` (bucket-level, no object-listing). The replication
+  destination-Region lookup uses `GetBucketLocation` too.
+- **Removed account-level Block Public Access assessment.** The
+  `s3control:GetPublicAccessBlock` / `s3:GetAccountPublicAccessBlock` call is gone;
+  account-wide configuration is out of scope. Block Public Access is now evaluated at
+  the **bucket level only**, and the "not configured at the bucket level" finding notes
+  that account-level BPA should be verified separately (escalating to critical only when
+  the bucket-level ACL or policy shows real public exposure).
+
+### Removed
+- `s3:ListBucket`, `s3:ListAllMyBuckets`, and `s3:GetAccountPublicAccessBlock` from the
+  skill's required permissions. The only permission beyond `AIDevOpsAgentAccessPolicy`
+  is now `s3:GetBucketWebsite`, granted via the CloudFormation template's
+  `EnableStorageS3Resiliency` parameter.
+
+### Fixed
+- Replication "lookup failed" handling: because `GetBucketLocation` (unlike
+  `HeadBucket`) does not return a Region when access is denied, the two prior
+  cross/same-region "lookup failed" scenarios are collapsed into a single honest
+  "destination Region unknown" finding — cross-region redundancy is reported as
+  unconfirmable rather than guessed.
+
 ## [1.0.1] - 2026-08-10
 
 ### Added
